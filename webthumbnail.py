@@ -6,6 +6,7 @@ from __future__ import print_function, division, unicode_literals
 import sys
 import argparse
 import signal
+import logging
 
 from PySide.QtCore import Signal, Qt, QObject
 from PySide.QtGui import QApplication, QImage, QPainter
@@ -18,6 +19,7 @@ argument_parser.add_argument("url")
 argument_parser.add_argument("--width", type=int)
 argument_parser.add_argument("--height", type=int)
 argument_parser.add_argument("--out", default="out.png")
+argument_parser.add_argument("--debug", action='store_true')
 
 
 class Thumbnailer(QObject):
@@ -41,6 +43,7 @@ class Thumbnailer(QObject):
         self.page.mainFrame().load(url)
 
     def on_page_finished(self, ok):
+        logging.debug('on_page_finished: ok=%s', ok)
         if ok:
             self.render()
         if self.reply is None:
@@ -55,10 +58,14 @@ class Thumbnailer(QObject):
         self.finished.emit(error)
 
     def on_network_finished(self, reply):
+        logging.debug('on_network_finished: %s', reply.url())
         self.reply = reply
 
     def render(self):
-        self.page.setViewportSize(self.page.mainFrame().contentsSize())
+        logging.debug('render')
+        size = self.page.mainFrame().contentsSize()
+        logging.debug('framesize: %s', size)
+        self.page.setViewportSize(size)
         image = QImage(self.page.viewportSize(), QImage.Format_ARGB32)
         painter = QPainter(image)
         self.page.mainFrame().render(painter)
@@ -74,6 +81,7 @@ class Thumbnailer(QObject):
                     Qt.KeepAspectRatioByExpanding,
                     Qt.SmoothTransformation)
             outimg = scaled.copy(0, 0, self.width, self.height)
+        logging.debug('imagesize: %s', outimg.size())
         outimg.save(self.out)
 
 
@@ -87,7 +95,18 @@ def on_finished(error):
 
 def main():
     signal.signal(signal.SIGINT, signal.SIG_DFL)
+
     args = argument_parser.parse_args()
+
+    if args.debug:
+        logger = logging.getLogger()
+        logger.setLevel(logging.DEBUG)
+        formatter = logging.Formatter(
+            "%(asctime)s: %(levelname)s: %(message)s", "%Y-%m-%d %H:%M:%S")
+        handler = logging.StreamHandler()
+        handler.setFormatter(formatter)
+        logger.addHandler(handler)
+
     app = QApplication(sys.argv)
     thumbnailer = Thumbnailer(args.url, args.out, args.width, args.height)
     thumbnailer.finished.connect(on_finished)
