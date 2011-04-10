@@ -50,10 +50,11 @@ class Thumbnailer(QObject):
 
     def on_page_finished(self, ok):
         logging.debug('on_page_finished: ok=%s', ok)
+        body = self.page.mainFrame().findFirstElement('body')
         if ok:
             self.render()
-        elif self.reply and self.reply.error() == QNetworkReply.NoError:
-            # also render page even when !ok for timeout
+        elif not body.isNull():
+            # partly succeeded
             self.render()
         if self.reply is None:
             # FIXME: on_network_finished() is not called.
@@ -69,7 +70,7 @@ class Thumbnailer(QObject):
     def on_network_finished(self, reply):
         #logging.debug('on_network_finished: %s', reply.url().toString())
         logging.debug('on_network_finished: %s', reply.url().toEncoded())
-        if self.reply is None:
+        if reply.url() == self.page.mainFrame().url():
             self.reply = reply
 
     def on_timeout(self):
