@@ -66,13 +66,9 @@ class Thumbnailer(QObject):
         if self.width is None and self.height is None:
             outimg = image
         elif self.width is None:
-            width = int(image.width() * (self.height / image.height()))
-            outimg = image.scaled(width, self.height,
-                    mode=Qt.SmoothTransformation)
+            outimg = image.scaledToHeight(self.height, Qt.SmoothTransformation)
         elif self.height is None:
-            height = int(image.height() * (self.width / image.width()))
-            outimg = image.scaled(self.width, height,
-                    mode=Qt.SmoothTransformation)
+            outimg = image.scaledToWidth(self.width, Qt.SmoothTransformation)
         else:
             scaled = image.scaled(self.width, self.height,
                     Qt.KeepAspectRatioByExpanding,
