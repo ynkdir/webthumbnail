@@ -8,7 +8,7 @@ import argparse
 import signal
 import logging
 
-from PySide.QtCore import Signal, Qt, QObject
+from PySide.QtCore import Signal, Qt, QObject, QTimer
 from PySide.QtGui import QApplication, QImage, QPainter
 from PySide.QtNetwork import QNetworkReply
 from PySide.QtWebKit import QWebPage
@@ -16,9 +16,10 @@ from PySide.QtWebKit import QWebPage
 
 argument_parser = argparse.ArgumentParser(description="Webpage thumbnailer")
 argument_parser.add_argument("url")
+argument_parser.add_argument("--out", default="out.png")
 argument_parser.add_argument("--width", type=int)
 argument_parser.add_argument("--height", type=int)
-argument_parser.add_argument("--out", default="out.png")
+argument_parser.add_argument("--timeout", type=float, help="sec")
 argument_parser.add_argument("--debug", action='store_true')
 
 
@@ -28,7 +29,7 @@ class Thumbnailer(QObject):
 
     finished = Signal(unicode)
 
-    def __init__(self, url, out, width, height):
+    def __init__(self, url, out, width, height, timeout):
         super(Thumbnailer, self).__init__()
         self.url = url
         self.out = out
@@ -44,10 +45,15 @@ class Thumbnailer(QObject):
         self.page.networkAccessManager().finished.connect(
                 self.on_network_finished)
         self.page.mainFrame().load(url)
+        if timeout is not None and timeout > 0:
+            QTimer.singleShot(int(timeout * 1000), self.on_timeout)
 
     def on_page_finished(self, ok):
         logging.debug('on_page_finished: ok=%s', ok)
         if ok:
+            self.render()
+        elif self.reply and self.reply.error() == QNetworkReply.NoError:
+            # also render page even when !ok for timeout
             self.render()
         if self.reply is None:
             # FIXME: on_network_finished() is not called.
@@ -62,7 +68,12 @@ class Thumbnailer(QObject):
 
     def on_network_finished(self, reply):
         logging.debug('on_network_finished: %s', reply.url())
-        self.reply = reply
+        if self.reply is None:
+            self.reply = reply
+
+    def on_timeout(self):
+        logging.debug('on_timeout')
+        self.page.triggerAction(QWebPage.Stop)
 
     def render(self):
         logging.debug('render')
@@ -114,7 +125,8 @@ def main():
         logger.addHandler(handler)
 
     app = QApplication(sys.argv)
-    thumbnailer = Thumbnailer(args.url, args.out, args.width, args.height)
+    thumbnailer = Thumbnailer(args.url, args.out, args.width, args.height,
+            args.timeout)
     thumbnailer.finished.connect(on_finished)
     sys.exit(app.exec_())
 
