@@ -23,6 +23,9 @@ argument_parser.add_argument("--debug", action='store_true')
 
 
 class Thumbnailer(QObject):
+    MAX_WIDTH = 4096
+    MAX_HEIGHT = 4096
+
     finished = Signal(unicode)
 
     def __init__(self, url, out, width, height):
@@ -65,6 +68,9 @@ class Thumbnailer(QObject):
         logging.debug('render')
         size = self.page.mainFrame().contentsSize()
         logging.debug('framesize: %s', size)
+        size.setWidth(min(size.width(), self.MAX_WIDTH))
+        size.setHeight(min(size.height(), self.MAX_HEIGHT))
+        logging.debug('rendersize: %s', size)
         self.page.setViewportSize(size)
         image = QImage(self.page.viewportSize(), QImage.Format_ARGB32)
         painter = QPainter(image)
