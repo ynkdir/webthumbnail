@@ -67,7 +67,8 @@ class Thumbnailer(QObject):
         self.finished.emit(error)
 
     def on_network_finished(self, reply):
-        logging.debug('on_network_finished: %s', reply.url())
+        #logging.debug('on_network_finished: %s', reply.url().toString())
+        logging.debug('on_network_finished: %s', reply.url().toEncoded())
         if self.reply is None:
             self.reply = reply
 
