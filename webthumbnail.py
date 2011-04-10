@@ -10,7 +10,6 @@ import logging
 
 from PySide.QtCore import Signal, Qt, QObject, QTimer
 from PySide.QtGui import QApplication, QImage, QPainter
-from PySide.QtNetwork import QNetworkReply
 from PySide.QtWebKit import QWebPage
 
 
@@ -27,7 +26,7 @@ class Thumbnailer(QObject):
     MAX_WIDTH = 4096
     MAX_HEIGHT = 4096
 
-    finished = Signal(unicode)
+    finished = Signal(bool)
 
     def __init__(self, url, out, width, height, timeout):
         super(Thumbnailer, self).__init__()
@@ -35,7 +34,6 @@ class Thumbnailer(QObject):
         self.out = out
         self.width = width
         self.height = height
-        self.reply = None
         self.page = QWebPage(self)
         self.page.mainFrame().setScrollBarPolicy(
                 Qt.Horizontal, Qt.ScrollBarAlwaysOff)
@@ -50,28 +48,19 @@ class Thumbnailer(QObject):
 
     def on_page_finished(self, ok):
         logging.debug('on_page_finished: ok=%s', ok)
-        body = self.page.mainFrame().findFirstElement('body')
+        isempty = self.page.mainFrame().contentsSize().isEmpty()
         if ok:
-            self.render()
-        elif not body.isNull():
-            # partly succeeded
-            self.render()
-        if self.reply is None:
-            # FIXME: on_network_finished() is not called.
-            # May be url is invalid (e.g. port >= 65535).
-            # How to get error for it?
-            error = "Invalid Request Error"
-        elif self.reply.error() == QNetworkReply.NoError:
-            error = None
+            # content can be empty.  save empty image?
+            if not isempty:
+                self.render()
         else:
-            error = self.reply.error().name
-        self.finished.emit(error)
+            if not isempty:
+                # timeout and/or partly loaded.
+                self.render()
+        self.finished.emit(ok)
 
     def on_network_finished(self, reply):
-        #logging.debug('on_network_finished: %s', reply.url().toString())
         logging.debug('on_network_finished: %s', reply.url().toEncoded())
-        if reply.url() == self.page.mainFrame().url():
-            self.reply = reply
 
     def on_timeout(self):
         logging.debug('on_timeout')
@@ -104,11 +93,10 @@ class Thumbnailer(QObject):
         outimg.save(self.out)
 
 
-def on_finished(error):
-    if error is None:
+def on_finished(ok):
+    if ok:
         QApplication.exit(0)
     else:
-        sys.stderr.write("{0}\n".format(error))
         QApplication.exit(1)
 
 
