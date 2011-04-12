@@ -8,7 +8,7 @@ import argparse
 import signal
 import logging
 
-from PySide.QtCore import Signal, Qt, QObject, QTimer
+from PySide.QtCore import Signal, Qt, QObject, QTimer, QSize
 from PySide.QtGui import QApplication, QImage, QPainter
 from PySide.QtWebKit import QWebPage, QWebSettings
 
@@ -21,6 +21,10 @@ argument_parser.add_argument("--width", type=int,
         help="scale image to specified width")
 argument_parser.add_argument("--height", type=int,
         help="scale image to specified height")
+argument_parser.add_argument("--window-width", type=int,
+        help="window width")
+argument_parser.add_argument("--window-height", type=int,
+        help="window height")
 argument_parser.add_argument("--timeout", type=float,
         help="render page on timeout (sec)")
 argument_parser.add_argument("--noplugin", action="store_true",
@@ -30,14 +34,14 @@ argument_parser.add_argument("--debug", action='store_true',
 
 
 class Thumbnailer(QObject):
-    MAX_WIDTH = 4096
-    MAX_HEIGHT = 4096
+    DEFAULT_WINDOW_WIDTH = 1024
+    DEFAULT_WINDOW_HEIGHT = 768
 
     finished = Signal(bool)
 
-    def __init__(self, url, out, width, height, timeout):
+    def __init__(self, out, width, height, timeout=None,
+            window_width=None, window_height=None):
         super(Thumbnailer, self).__init__()
-        self.url = url
         self.out = out
         self.width = width
         self.height = height
@@ -55,9 +59,16 @@ class Thumbnailer(QObject):
         self.page.loadFinished.connect(self.on_page_finished)
         self.page.networkAccessManager().finished.connect(
                 self.on_network_finished)
+        if window_width is None:
+            window_width = self.DEFAULT_WINDOW_WIDTH
+        if window_height is None:
+            window_height = self.DEFAULT_WINDOW_HEIGHT
+        self.page.setViewportSize(QSize(window_width, window_height))
+
+    def load(self, url):
         self.page.mainFrame().load(url)
         if self.timeout is not None:
-            QTimer.singleShot(int(timeout * 1000), self.on_timeout)
+            QTimer.singleShot(int(self.timeout * 1000), self.on_timeout)
 
     def on_page_started(self):
         logging.debug('on_page_started')
@@ -78,42 +89,33 @@ class Thumbnailer(QObject):
 
     def finish(self, ok):
         logging.debug('finish: ok=%s', ok)
-        isempty = self.page.mainFrame().contentsSize().isEmpty()
-        if ok:
-            # content can be empty.  save empty image?
-            if not isempty:
-                self.render()
-        else:
-            if not isempty:
-                # timeout and/or partly loaded.
-                self.render()
+        # page loaded successfully or partly loaded with or without timeout
+        image = self.render()
+        scaled = self.scale(image, self.width, self.height)
+        logging.debug('imagesize: %s', scaled.size())
+        scaled.save(self.out)
         self.finished.emit(ok)
 
     def render(self):
-        logging.debug('render')
-        size = self.page.mainFrame().contentsSize()
-        logging.debug('framesize: %s', size)
-        size.setWidth(min(size.width(), self.MAX_WIDTH))
-        size.setHeight(min(size.height(), self.MAX_HEIGHT))
-        logging.debug('rendersize: %s', size)
-        self.page.setViewportSize(size)
-        image = QImage(self.page.viewportSize(), QImage.Format_ARGB32)
+        image = QImage(self.page.viewportSize(), QImage.Format_RGB32)
         painter = QPainter(image)
         self.page.mainFrame().render(painter)
         painter.end()
-        if self.width is None and self.height is None:
-            outimg = image
-        elif self.width is None:
-            outimg = image.scaledToHeight(self.height, Qt.SmoothTransformation)
-        elif self.height is None:
-            outimg = image.scaledToWidth(self.width, Qt.SmoothTransformation)
+        return image
+
+    def scale(self, image, width, height):
+        if width is None and height is None:
+            scaled = image
+        elif width is None:
+            scaled = image.scaledToHeight(height, Qt.SmoothTransformation)
+        elif height is None:
+            scaled = image.scaledToWidth(width, Qt.SmoothTransformation)
         else:
-            scaled = image.scaled(self.width, self.height,
+            scaled = image.scaled(width, height,
                     Qt.KeepAspectRatioByExpanding,
                     Qt.SmoothTransformation)
-            outimg = scaled.copy(0, 0, self.width, self.height)
-        logging.debug('imagesize: %s', outimg.size())
-        outimg.save(self.out)
+            scaled = scaled.copy(0, 0, width, height)
+        return scaled
 
 
 def on_finished(ok):
@@ -140,9 +142,12 @@ def main():
     app = QApplication(sys.argv)
     QWebSettings.globalSettings() \
             .setAttribute(QWebSettings.PluginsEnabled, not args.noplugin)
-    thumbnailer = Thumbnailer(args.url, args.out, args.width, args.height,
-            args.timeout)
+    thumbnailer = Thumbnailer(args.out, args.width, args.height,
+            timeout=args.timeout,
+            window_width=args.window_width,
+            window_height=args.window_height)
     thumbnailer.finished.connect(on_finished)
+    thumbnailer.load(args.url)
     sys.exit(app.exec_())
 
 
