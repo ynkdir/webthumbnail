@@ -15,13 +15,18 @@ from PySide.QtWebKit import QWebPage, QWebSettings
 
 argument_parser = argparse.ArgumentParser(description="Webpage thumbnailer")
 argument_parser.add_argument("url")
-argument_parser.add_argument("--out", default="out.png")
-argument_parser.add_argument("--width", type=int)
-argument_parser.add_argument("--height", type=int)
-argument_parser.add_argument("--timeout", type=float, help="sec")
+argument_parser.add_argument("--out", default="out.png",
+        help="write image to specified file")
+argument_parser.add_argument("--width", type=int,
+        help="scale image to specified width")
+argument_parser.add_argument("--height", type=int,
+        help="scale image to specified height")
+argument_parser.add_argument("--timeout", type=float,
+        help="render page on timeout (sec)")
 argument_parser.add_argument("--noplugin", action="store_true",
         help="disable plugin")
-argument_parser.add_argument("--debug", action='store_true')
+argument_parser.add_argument("--debug", action='store_true',
+        help="enable debug output")
 
 
 class Thumbnailer(QObject):
@@ -36,20 +41,43 @@ class Thumbnailer(QObject):
         self.out = out
         self.width = width
         self.height = height
+        if timeout is not None and timeout > 0:
+            self.timeout = timeout
+        else:
+            self.timeout = None
+        self.ok = None
         self.page = QWebPage(self)
         self.page.mainFrame().setScrollBarPolicy(
                 Qt.Horizontal, Qt.ScrollBarAlwaysOff)
         self.page.mainFrame().setScrollBarPolicy(
                 Qt.Vertical, Qt.ScrollBarAlwaysOff)
+        self.page.loadStarted.connect(self.on_page_started)
         self.page.loadFinished.connect(self.on_page_finished)
         self.page.networkAccessManager().finished.connect(
                 self.on_network_finished)
         self.page.mainFrame().load(url)
-        if timeout is not None and timeout > 0:
+        if self.timeout is not None:
             QTimer.singleShot(int(timeout * 1000), self.on_timeout)
+
+    def on_page_started(self):
+        logging.debug('on_page_started')
+        self.ok = None
 
     def on_page_finished(self, ok):
         logging.debug('on_page_finished: ok=%s', ok)
+        self.ok = ok
+        if self.timeout is None:
+            self.finish(self.ok)
+
+    def on_network_finished(self, reply):
+        logging.debug('on_network_finished: %s', reply.url().toEncoded())
+
+    def on_timeout(self):
+        logging.debug('on_timeout')
+        self.finish(self.ok if self.ok is not None else False)
+
+    def finish(self, ok):
+        logging.debug('finish: ok=%s', ok)
         isempty = self.page.mainFrame().contentsSize().isEmpty()
         if ok:
             # content can be empty.  save empty image?
@@ -60,13 +88,6 @@ class Thumbnailer(QObject):
                 # timeout and/or partly loaded.
                 self.render()
         self.finished.emit(ok)
-
-    def on_network_finished(self, reply):
-        logging.debug('on_network_finished: %s', reply.url().toEncoded())
-
-    def on_timeout(self):
-        logging.debug('on_timeout')
-        self.page.triggerAction(QWebPage.Stop)
 
     def render(self):
         logging.debug('render')
