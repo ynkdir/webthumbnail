@@ -10,7 +10,7 @@ import logging
 
 from PySide.QtCore import Signal, Qt, QObject, QTimer
 from PySide.QtGui import QApplication, QImage, QPainter
-from PySide.QtWebKit import QWebPage
+from PySide.QtWebKit import QWebPage, QWebSettings
 
 
 argument_parser = argparse.ArgumentParser(description="Webpage thumbnailer")
@@ -19,6 +19,8 @@ argument_parser.add_argument("--out", default="out.png")
 argument_parser.add_argument("--width", type=int)
 argument_parser.add_argument("--height", type=int)
 argument_parser.add_argument("--timeout", type=float, help="sec")
+argument_parser.add_argument("--noplugin", action="store_true",
+        help="disable plugin")
 argument_parser.add_argument("--debug", action='store_true')
 
 
@@ -115,6 +117,8 @@ def main():
         logger.addHandler(handler)
 
     app = QApplication(sys.argv)
+    QWebSettings.globalSettings() \
+            .setAttribute(QWebSettings.PluginsEnabled, not args.noplugin)
     thumbnailer = Thumbnailer(args.url, args.out, args.width, args.height,
             args.timeout)
     thumbnailer.finished.connect(on_finished)
