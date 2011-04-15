@@ -21,9 +21,9 @@ argument_parser.add_argument("--width", type=int,
         help="scale image to specified width")
 argument_parser.add_argument("--height", type=int,
         help="scale image to specified height")
-argument_parser.add_argument("--window-width", type=int,
+argument_parser.add_argument("--window-width", type=int, default=1024,
         help="window width")
-argument_parser.add_argument("--window-height", type=int,
+argument_parser.add_argument("--window-height", type=int, default=768,
         help="window height")
 argument_parser.add_argument("--timeout", type=float,
         help="render page on timeout (sec)")
@@ -33,22 +33,11 @@ argument_parser.add_argument("--debug", action='store_true',
         help="enable debug output")
 
 
-class Thumbnailer(QObject):
-    DEFAULT_WINDOW_WIDTH = 1024
-    DEFAULT_WINDOW_HEIGHT = 768
-
+class WebThumbnailer(QObject):
     finished = Signal(bool)
 
-    def __init__(self, out, width, height, timeout=None,
-            window_width=None, window_height=None):
-        super(Thumbnailer, self).__init__()
-        self.out = out
-        self.width = width
-        self.height = height
-        if timeout is not None and timeout > 0:
-            self.timeout = timeout
-        else:
-            self.timeout = None
+    def __init__(self, window_width, window_height):
+        super(WebThumbnailer, self).__init__()
         self.ok = None
         self.page = QWebPage(self)
         self.page.mainFrame().setScrollBarPolicy(
@@ -59,16 +48,7 @@ class Thumbnailer(QObject):
         self.page.loadFinished.connect(self.on_page_finished)
         self.page.networkAccessManager().finished.connect(
                 self.on_network_finished)
-        if window_width is None:
-            window_width = self.DEFAULT_WINDOW_WIDTH
-        if window_height is None:
-            window_height = self.DEFAULT_WINDOW_HEIGHT
         self.page.setViewportSize(QSize(window_width, window_height))
-
-    def load(self, url):
-        self.page.mainFrame().load(url)
-        if self.timeout is not None:
-            QTimer.singleShot(int(self.timeout * 1000), self.on_timeout)
 
     def on_page_started(self):
         logging.debug('on_page_started')
@@ -77,24 +57,19 @@ class Thumbnailer(QObject):
     def on_page_finished(self, ok):
         logging.debug('on_page_finished: ok=%s', ok)
         self.ok = ok
-        if self.timeout is None:
-            self.finish(self.ok)
+        self.finished.emit(ok)
 
     def on_network_finished(self, reply):
         logging.debug('on_network_finished: %s', reply.url().toEncoded())
 
-    def on_timeout(self):
-        logging.debug('on_timeout')
-        self.finish(self.ok if self.ok is not None else False)
+    def load(self, url):
+        self.page.mainFrame().load(url)
 
-    def finish(self, ok):
-        logging.debug('finish: ok=%s', ok)
-        # page loaded successfully or partly loaded with or without timeout
+    def save(self, out, width=None, height=None):
         image = self.render()
-        scaled = self.scale(image, self.width, self.height)
+        scaled = self.scale(image, width, height)
+        scaled.save(out)
         logging.debug('imagesize: %s', scaled.size())
-        scaled.save(self.out)
-        self.finished.emit(ok)
 
     def render(self):
         image = QImage(self.page.viewportSize(), QImage.Format_RGB32)
@@ -103,7 +78,7 @@ class Thumbnailer(QObject):
         painter.end()
         return image
 
-    def scale(self, image, width, height):
+    def scale(self, image, width=None, height=None):
         if width is None and height is None:
             scaled = image
         elif width is None:
@@ -116,13 +91,6 @@ class Thumbnailer(QObject):
                     Qt.SmoothTransformation)
             scaled = scaled.copy(0, 0, width, height)
         return scaled
-
-
-def on_finished(ok):
-    if ok:
-        QApplication.exit(0)
-    else:
-        QApplication.exit(1)
 
 
 def main():
@@ -142,12 +110,24 @@ def main():
     app = QApplication(sys.argv)
     QWebSettings.globalSettings() \
             .setAttribute(QWebSettings.PluginsEnabled, not args.noplugin)
-    thumbnailer = Thumbnailer(args.out, args.width, args.height,
-            timeout=args.timeout,
-            window_width=args.window_width,
-            window_height=args.window_height)
-    thumbnailer.finished.connect(on_finished)
-    thumbnailer.load(args.url)
+
+    webthumbnailer = WebThumbnailer(args.window_width, args.window_height)
+
+    def on_finished(ok):
+        webthumbnailer.save(args.out, args.width, args.height)
+        QApplication.exit(0 if ok else 1)
+
+    def on_timedout():
+        webthumbnailer.save(args.out, args.width, args.height)
+        QApplication.exit(0 if webthumbnailer.ok else 1)
+
+    if args.timeout is None:
+        webthumbnailer.finished.connect(on_finished)
+    else:
+        QTimer.singleShot(int(args.timeout * 1000), on_timedout)
+
+    webthumbnailer.load(args.url)
+
     sys.exit(app.exec_())
 
 
